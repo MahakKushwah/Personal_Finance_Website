@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,6 +28,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+# Required for allauth
+SITE_ID = 1 
 
 # Application definition
 
@@ -37,11 +40,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
     'User',
+    'Transactions',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
 ]
 
 # In built Authentication Backends key in Django so that we can use Authentication in our app
 AUTHENTICATION_BACKENDS=[
+    'allauth.account.auth_backends.AuthenticationBackend',  # Google Login
     'django.contrib.auth.backends.ModelBackend'
 ]
 
@@ -53,6 +63,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = 'Personal_Finance_Insights_Website.urls'
@@ -71,6 +82,29 @@ TEMPLATES = [
         },
     },
 ]
+
+#Social login settings
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'APP': {
+            'client_id': config('GOOGLE_CLIENT_ID'),
+            'secret': config('GOOGLE_CLIENT_SECRET'),          
+        },
+        'SCOPE': ['profile','email',],
+         'AUTH_PARAMS':
+           {
+               'access_type': 'online',
+               'prompt': 'select_account',
+            },
+        'METHOD': 'oauth2',
+        'VERIFIED_EMAIL': True,
+    }
+}
+
+SOCIALACCOUNT_LOGIN_ON_GET=True
+LOGIN_REDIRECT_URL = '/dashboard/'     # custom redirect view
+LOGIN_URL = 'login'
 
 WSGI_APPLICATION = 'Personal_Finance_Insights_Website.wsgi.application'
 
@@ -120,7 +154,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

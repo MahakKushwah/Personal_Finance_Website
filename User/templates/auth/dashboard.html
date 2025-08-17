@@ -1,0 +1,107 @@
+{% extends 'layouts/app.html' %}
+{% load static %}
+{% block title %}Bank Statement Analyzer{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+{% endblock %}
+
+{% block content %}
+<!-- For Success Message -->
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-success" role="alert" id="success-message">
+            {{ message }}
+        </div>
+    {% endfor %}
+{% endif %}
+<div class="container">
+    <div class="header">
+        <h1>Bank Statement Analyzer</h1>
+        <p>Upload your bank statements to analyze expenses, investments, and income patterns</p>
+    </div>
+
+    <div class="upload-section">
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📊</div>
+                <h3>Upload Bank Statement</h3>
+                <p style="margin: 15px 0; color: #6c757d;">
+                    Drag and drop your PDF or Excel files here, or click to browse
+                </p>
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                    Choose Files
+                </button>
+                <input type="file" id="fileInput" class="file-input" 
+                       accept=".pdf,.xlsx,.xls,.csv" multiple>
+                <p style="margin-top: 15px; font-size: 0.9rem; color: #6c757d;">
+                    Supported formats: PDF, Excel (.xlsx, .xls), CSV
+                </p>
+        </div>
+    </div>
+
+    <div class="error-message" id="errorMessage"></div>
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing your bank statement...</p>
+        </div>
+
+    <div class="analytics-section" id="analyticsSection">
+        <div class="stats-grid">
+            <div class="stat-card expense-card">
+                <div class="stat-value" id="totalExpenses">₹0</div>
+                <div class="stat-label">Total Expenses</div>
+            </div>
+            <div class="stat-card investment-card">
+                <div class="stat-value" id="totalInvestments">₹0</div>
+                <div class="stat-label">Total Investments</div>
+            </div>
+            <div class="stat-card income-card">
+                <div class="stat-value" id="totalIncome">₹0</div>
+                <div class="stat-label">Total Income</div>
+            </div>
+            <div class="stat-card other-card">
+                <div class="stat-value" id="totalOthers">₹0</div>
+                <div class="stat-label">Other Transactions</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <div class="chart-title">Expense Categories</div>
+                <canvas id="categoryChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Monthly Trends</div>
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+
+        <div class="transaction-table">
+            <div class="table-header">
+                <h3>Recent Transactions</h3>
+            </div>
+            <div class="table-content">
+                <table id="transactionTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Category</th>
+                            <th>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactionBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- External JS file -->
+{% block extra_js %}
+<script src="{% static 'javascript/dashboard.js' %}"></script>
+{% endblock %}
+
+{% endblock %}
+

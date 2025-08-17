@@ -21,4 +21,6 @@ import User.urls
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include(User.urls)),
+    path('accounts/', include('allauth.urls')), # <--- Add this google url 
+    path('dashboard/', include('Transactions.urls'))   #<----Add this URL to parse the file 
 ]
