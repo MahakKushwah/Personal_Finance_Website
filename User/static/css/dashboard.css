@@ -1,4 +1,4 @@
-* {
+    * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
@@ -91,6 +91,22 @@
         .upload-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(0, 123, 255, 0.3);
+        }
+
+        #uploadBank{
+            margin: 15px 0; 
+            color: #6c757d;
+        }
+
+        #supportedFormats{
+            margin-top: 15px; 
+            font-size: 0.9rem; 
+            color: #6c757d;
+        }
+
+        #hiddenFileList{
+            display: none; 
+            margin-top: 10px;
         }
 
         .analytics-section {
@@ -221,3 +237,53 @@
 
         .amount-positive { color: #28a745; font-weight: bold; }
         .amount-negative { color: #dc3545; font-weight: bold; }
+    
+
+        .file-filter-container {
+            margin-top: 20px;
+        }
+
+        /* Make button + date filter appear in one line */
+        .filter-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;  /* button left, date filter right */
+            gap: 15px;
+        }
+
+        /* Date filter fields inline */
+        .date-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        /* Prevent full-width button */
+        #showFilesBtn {
+            width: auto !important;
+            padding: 8px 16px;
+        }
+
+        .filter-row #showFilesBtn {
+            margin-right: auto;   /* pushes button left */
+        }
+
+        .filter-row .date-filter {
+            margin-left: auto;    /* pushes date filter right */
+        }
+
+        /* Responsive: stack on mobile */
+        @media (max-width: 768px) {
+            .filter-row {
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            }
+        }
+
+        /* Date Filter Message  */
+        #dateFilterMessage{
+            display:none; 
+            color:red; 
+            font-weight:bold;
+        }

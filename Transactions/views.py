@@ -132,3 +132,9 @@ def transaction_list(request):
         'category_data': json.dumps(latest_by_category),
         'transactions': transactions
     })
+
+def delete_all_transactions(request):
+    if request.method == "POST":
+        Transaction.objects.all().delete()
+        return JsonResponse({"message": "All transactions deleted successfully"})
+    return JsonResponse({"error": "Invalid request"}, status=400)

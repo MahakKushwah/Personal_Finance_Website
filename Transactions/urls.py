@@ -5,4 +5,5 @@ from . import views
 urlpatterns = [
     path('api/upload-transactions/', upload_transactions, name='upload-transactions'),
     path('transactions/', views.transaction_list, name='transaction_list'),
+#     path("delete_all/", views.delete_all_transactions, name="delete_all_transactions"),
 ]

@@ -7,6 +7,13 @@
         const fileInput = document.getElementById('fileInput');
         const loading = document.getElementById('loading');
         const errorMessage = document.getElementById('errorMessage');
+        const showFilesBtn = document.getElementById("showFilesBtn");
+        const fileList = document.getElementById("fileList");
+        //Date Filter Logic 
+        const fromInput = document.getElementById("from");
+        const toInput = document.getElementById("to");
+        const filterBtn = document.querySelector(".filter-btn");
+        const noDataMessage = document.getElementById("noDataMessage");
 
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
@@ -22,15 +29,106 @@
             e.preventDefault();
             uploadArea.classList.remove('dragover');
             const files = e.dataTransfer.files;
+            clearDateFilters();
             handleFiles(files);
         });
 
-        // uploadArea.addEventListener('click', () => {
-        //     fileInput.click();
-        // });
+        // When files are selected, show them in UI
+        let selectedFiles = [];
+
+        // Store selected files
+        fileInput.addEventListener("change", () => {
+            const newFiles = Array.from(fileInput.files);
+
+            // Only add files that are not already in the list (prevent duplicates)
+            newFiles.forEach(file => {
+                if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                    selectedFiles.push(file);
+                }
+            });
+        });
+
+        // Toggle file list display on button click
+        showFilesBtn.addEventListener("click", () => {
+            if (fileList.style.display === "none") {
+                fileList.style.display = "block";
+
+                if (selectedFiles.length === 0) {
+                    fileList.innerHTML = "<li>No files selected</li>";
+                } else {
+                    // Render only missing items (don’t clear old ones)
+                    const existingNames = Array.from(fileList.querySelectorAll("li")).map(li => li.textContent);
+
+                    selectedFiles.forEach(file => {
+                        if (!existingNames.includes(file.name)) {
+                            const li = document.createElement("li");
+                            li.textContent = file.name;
+                            fileList.appendChild(li);
+                        }
+                    });
+                }
+
+                setTimeout(() => {
+                    fileList.style.display = "none";
+                }, 2000);
+
+            } else {
+                fileList.style.display = "none";
+            }
+        });
 
         fileInput.addEventListener('change', (e) => {
+            clearDateFilters();
             handleFiles(e.target.files);
+        });
+
+        // Date Range Filter
+        filterBtn.addEventListener("click", () => {
+            const fromDate = fromInput.value ? new Date(fromInput.value) : null;
+            const toDate = toInput.value ? new Date(toInput.value) : null;
+            const today = new Date();  // current date
+
+            let allTransactions = [];
+            let filteredTransactions = []
+            allTransactions = transactionData;
+
+            const flatTransactions = transactionData.flat();
+            let filtered = flatTransactions;
+
+            if (fromDate && toDate) {
+                // Case 1: From Date and To Date selected
+                filtered = flatTransactions.filter(tx => {
+                const txDate = new Date(tx.date);
+                return txDate >= fromDate && txDate <= toDate;
+                });
+            }else if (fromDate && !toDate) {
+                // Case 2: From only, use today as end
+                filtered = flatTransactions.filter(tx => {
+                const txDate = new Date(tx.date);
+                return txDate >= fromDate && txDate <= today;
+                });
+            }else if (!fromDate && toDate) {
+                // Case 3: To only, include everything before toDate
+                filtered = flatTransactions.filter(tx => {
+                const txDate = new Date(tx.date);
+                return txDate <= toDate;
+                });
+            } else {
+                // Case 4: No date selected -> show all
+                filtered = allTransactions.flat();
+            }
+
+            if (filtered.length === 0) {
+                noDataMessage.style.display = "block";
+                noDataMessage.textContent = `Transactions not found from ${fromInput.value} to ${toInput.value}`;
+            } else if (!fromDate && !toDate){
+                noDataMessage.style.display = "none";
+                analyzeTransactions();
+            }else {
+                noDataMessage.style.display = "none";
+                filteredTransactions = [filtered];  // update data set
+                analyzeTransactions(fromDate , toDate , filteredTransactions);
+            }
         });
 
         function showError(message) {
@@ -76,7 +174,7 @@
 
                 if (transactionData.length > 0) {
                     sendToBackend(transactionData); 
-                    analyzeTransactions();
+                    analyzeTransactions(fromDate = null , toDate = null , filteredTransactions = []);
                     showAnalytics(); 
                 } else {
                     showError('No transaction data found in the uploaded files.');
@@ -174,7 +272,7 @@
                 const row = data[i];
                 if (!row || row.length === 0) continue;
 
-                const date = parseDate(row[dateCol] || row["Date"] || row["date"] || "");
+                const parsedDate = parseDate(row[dateCol] || row["Date"] || row["date"] || "");
 				let formattedDate = null;
                 if (parsedDate instanceof Date && !isNaN(parsedDate)) {
                     // Add one day before formatting
@@ -557,10 +655,16 @@
             return 'Other';
         }
 
-        function analyzeTransactions() {
+        function analyzeTransactions(fromDate , toDate , filteredTransactions) {
             const categories = { 'Expense': 0, 'Investment': 0, 'Income': 0, 'Other': 0 };
             
-            const flatTransactions = transactionData.flat(); // Flattens nested arrays
+            let flatTransactions = [];
+            // Flattens nested arrays
+            if(fromDate && toDate || fromDate && !toDate || !fromDate && toDate){
+                flatTransactions = filteredTransactions.flat();
+            }else{
+                flatTransactions = transactionData.flat();
+            } 
 
             flatTransactions.forEach(transaction => {
                 categories[transaction.category] += (transaction.deposit || 0) + (transaction.withdrawal || 0);
@@ -574,8 +678,8 @@
 
             // Create charts
             createCategoryChart(categories);
-            createTrendChart();
-            populateTransactionTable();
+            createTrendChart(fromDate , toDate , filteredTransactions);
+            populateTransactionTable(fromDate , toDate , filteredTransactions);
             
             // Log summary for debugging
             console.log('Transaction Summary:', categories);
@@ -620,10 +724,15 @@
             });
         }
 
-        function createTrendChart() {
+        function createTrendChart(fromDate , toDate , filteredTransactions) {
             const monthlyData = {};
             
-            const flatTransactions = transactionData.flat();
+            let flatTransactions = [];
+            if(fromDate && toDate || fromDate && !toDate || !fromDate && toDate){
+                flatTransactions = filteredTransactions.flat();
+            }else{
+                flatTransactions = transactionData.flat();
+            }
 
             flatTransactions.forEach(transaction => {
                 const monthKey = new Date(transaction.date).toISOString().substring(0, 7);
@@ -689,12 +798,16 @@
             });
         }
 
-        function populateTransactionTable() {
+        function populateTransactionTable(fromDate , toDate , filteredTransactions) {
             const tbody = document.getElementById('transactionBody');
             tbody.innerHTML = '';
-
+            let flatTransactions = [];
             // Flatten in case transactionData is nested
-            const flatTransactions = transactionData.flat();
+            if(fromDate && toDate || fromDate && !toDate || !fromDate && toDate){
+                flatTransactions = filteredTransactions.flat();
+            }else{
+                flatTransactions = transactionData.flat();
+            }
 
             // Show latest 20 transactions
             const recentTransactions = flatTransactions
@@ -737,3 +850,25 @@
                 setTimeout(() => alertBox.style.display = 'none', 500);
             }
         }, 1000);
+
+        //To clear the Date Filter when adding new file
+        function clearDateFilters() {
+            fromInput.value = "";
+            toInput.value = "";
+        }
+
+        // async function deleteAllTransactions() {
+        //     const confirmDelete = confirm("Are you sure you want to delete all transactions?");
+        //     if (!confirmDelete) return;
+
+        //     const response = await fetch("/transactions/delete_all/", {
+        //         method: "POST",
+        //         headers: {
+        //         "X-CSRFToken": getCSRFToken(),  // make sure you include CSRF
+        //         },
+        //     });
+
+        //     const result = await response.json();
+        //     alert(result.message);
+        //     location.reload();  // reload page after deletion
+        // }
