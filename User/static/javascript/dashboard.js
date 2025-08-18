@@ -131,6 +131,35 @@
             }
         });
 
+        //To find the bank name 
+        function detectBankName(lines) {
+            const patterns = [
+                { regex: /hdfc/i, name: "HDFC Bank" },
+                { regex: /icici/i, name: "ICICI Bank" },
+                { regex: /state\s+bank\s+of\s+india|sbi/i, name: "State Bank of India (SBI)" },
+                { regex: /bank\s+of\s+india/i, name: "Bank of India" },
+                { regex: /axis/i, name: "Axis Bank" },
+                { regex: /kotak/i, name: "Kotak Mahindra Bank" },
+                { regex: /yes bank/i, name: "Yes Bank" },
+                { regex: /punjab/i, name: "Punjab National Bank" },
+                { regex: /canara/i, name: "Canara Bank" },
+                { regex: /federal/i, name: "Federal Bank" },
+            ];
+
+            // Scan only first N lines (header part of statement usually)
+            for (let i = 0; i < Math.min(20, lines.length); i++) {
+                const l = lines[i];
+                for (const p of patterns) {
+                    if (p.regex.test(l)) 
+                        return p.name;
+                }
+                // fallback: any line that contains "bank"
+                if (/bank/i.test(l)) 
+                    return l.trim();
+            }
+            return null;
+        }
+
         function showError(message) {
             errorMessage.textContent = message;
             setTimeout(() => {
@@ -164,6 +193,7 @@
                       transactions = transactions.concat(data);
                     } else if (ext === 'pdf') {
                       const data = await processPDF(file);
+                      //currentBankName = bankName;
                       transactions = transactions.concat(data);
                     } else {
                         showError('Unsupported file format. Please upload PDF, Excel, or CSV files : ${file.name}');
@@ -186,61 +216,64 @@
             }
         }
 
-        // async function processPDF(file) {
-        //     //Extra code added to check
-        //     return new Promise((resolve, reject) => {
-        //         const reader = new FileReader();
-        //         reader.onload = function () {
-        //             // Copy buffer so it isn’t detached by PDF.js
-        //             const arrayBuffer = this.result.slice(0);                 
-        //             // Define a function to load with optional password
-        //             function loadPDF(password = null) {
-        //                 // Clone again for each attempt (fresh buffer)
-        //                 const freshTypedArray = new Uint8Array(arrayBuffer.slice(0));
-        //                 pdfjsLib.getDocument({ data: freshTypedArray , password}).promise.then(pdf => {
-        //                 let text = "";
-        //                 const promises = [];
-                        
-        //                 for (let i = 1; i <= pdf.numPages; i++) {
-        //                     promises.push(pdf.getPage(i).then(page => {
-        //                         return page.getTextContent().then(content => {
-        //                             const pageText = content.items.map(item => item.str).join(" ");
-        //                             text += pageText + "\n";
-        //                         });
-        //                     })
-        //                 );
-        //             }
-        //                 // Wait for all pages to be processed, THEN parse
-        //             Promise.all(promises).then(() => {
-        //                 console.log("Text : " + text);
-        //                 const parsed = parseTransactionText(text); // THIS IS THE PARSED DATA
-        //                 // const categorized = categorizeTransactions(parsed);
-        //                 resolve(parsed); // Send parsed transactions back
-        //             }).catch(reject);
-        //         })
-        //         .catch(err => {
-        //                 if (err.name === "PasswordException") {
-        //                     if (err.code === pdfjsLib.PasswordResponses.NEED_PASSWORD ||
-        //                         err.code === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD) {
-        //                         const userPassword = prompt("This PDF is password protected. Please enter the password:");
-        //                         if (userPassword) {
-        //                             loadPDF(userPassword); // retry with password
-        //                         } else {
-        //                             reject("Password required to open PDF.");
-        //                         }
-        //                     }
-        //                 } else {
-        //                     reject(err);
-        //                     }
-        //                 });
-        //             }
-        //             // Start loading without password first
-        //             loadPDF();
-        //         };
-        //         reader.onerror = reject;
-        //         reader.readAsArrayBuffer(file);
-        //     });
-        // }
+        //let currentBankName = "";
+        async function processPDF(file) {
+
+            async function loadPDF(password = null) {
+                const arrayBuffer = await file.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const pdf = await pdfjsLib.getDocument({ data, password }).promise;
+                console.log("PDF loaded successfully", pdf.numPages);
+
+                let allLines = [];
+
+                for (let p = 1; p <= pdf.numPages; p++) {
+                    const page = await pdf.getPage(p);
+                    const content = await page.getTextContent();
+
+                    const byY = {};
+                    content.items.forEach((it) => {
+                        const y = Math.round(it.transform[5]);
+                        const x = it.transform[4];
+                        if (!byY[y]) byY[y] = [];
+                        byY[y].push({ x, str: it.str });
+                    });
+
+                    const pageLines = Object.keys(byY)
+                    .map(Number)
+                    .sort((a, b) => b - a)
+                    .map((y) =>
+                        byY[y]
+                        .sort((a, b) => a.x - b.x)
+                        .map((t) => t.str)
+                        .join(" ")
+                        .replace(/\s{2,}/g, " ")
+                        .trim()
+                    );
+                    allLines = allLines.concat(pageLines);
+                }
+                return parseTransactionText(allLines).transactions;
+            }
+            let transactions;
+            try {
+                transactions = await loadPDF();
+            } catch (err) {
+                if (err.name === "PasswordException") {
+                    if (err.code === pdfjsLib.PasswordResponses.NEED_PASSWORD ||err.code === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD) {
+                        const userPassword = prompt("This PDF is password protected. Enter password:");
+                        if (userPassword) {
+                            transactions = await loadPDF(userPassword);
+                        } else {
+                            throw new Error("Password required but not provided.");    
+                        }                      
+                    }
+                }else{
+                        throw err;
+                }
+                
+            }
+            return transactions;
+        }
         
         async function processExcel(file) {
             const arrayBuffer = await file.arrayBuffer();
@@ -272,7 +305,7 @@
                 const row = data[i];
                 if (!row || row.length === 0) continue;
 
-                const parsedDate = parseDate(row[dateCol] || row["Date"] || row["date"] || "");
+                const parsedDate = parseDate(row[dateCol] || row["Date"] || row["date"] || row["Txn Date"] || "");
 				let formattedDate = null;
                 if (parsedDate instanceof Date && !isNaN(parsedDate)) {
                     // Add one day before formatting
@@ -284,26 +317,24 @@
                 const depositAmount = parseFloat((row[depositCol] || row["Deposit Amount"] || row["Credit Amount"] || row["Credit"] ||'0').replace(/[₹,]/g, ''));
 				const totalamount = parseFloat((row["Balance"] || '0').replace(/[₹,]/g, ''));
 
-                if (!isNaN(withdrawalAmount) && withdrawalAmount > 0) {
-                    transactions.push({
-                        date : formattedDate,
+                //To identify whether the transaction type is credit or debit 
+                let type = null;
+                if (/CR/i.test(description))
+                    type = "credit";
+                else if (/DR/i.test(description)) 
+                    type = "debit";
+                else type = "debit";
+
+                if (parsed.length === 0 && type) {
+                    parsed.push({
+                        date: formattedDate,
                         description,
                         withdrawal: withdrawalAmount,
-                        type: "debit",
-                        category: categorizeTransaction(description, "debit"),
-                        balance: totalamount
-                    });
-                }
-
-                if (!isNaN(depositAmount) && depositAmount > 0) {
-                    transactions.push({
-                        date : formattedDate,
-                        description,
                         deposit: depositAmount,
-                        type: "credit",
-                        category: categorizeTransaction(description, "credit"),
-                        balance: totalamount
-                     });
+                        type,
+                        category: categorizeTransaction(description, type),
+                        balance: totalamount,
+                    });
                 }
             }
             return transactions;
@@ -316,7 +347,7 @@
                     skipEmptyLines: true,
                     complete: results => {
                         const transactions = results.data.map(row => {
-                            const rawDate = row["Date"] || row["date"] || "";
+                            const rawDate = row["Date"] || row["date"] || row["Txn Date"] || "";
                             const parsedDate = parseDate(rawDate);
                             let formattedDate = null;
                              if (parsedDate instanceof Date && !isNaN(parsedDate)) {
@@ -329,26 +360,24 @@
                             const deposit = parseFloat((row["Deposit Amount"] || row["Credit Amount"] || row["Credit"] || '0').replace(/[₹,]/g, ''));
                             const totalamount = parseFloat((row["Balance"] || '0').replace(/[₹,]/g, ''));
                             const parsed = [];
+                            
+                            //To identify whether the transaction type is credit or debit 
+                             let type = null;
+                            if (/CR/i.test(description))
+                                 type = "credit";
+                            else if (/DR/i.test(description)) 
+                                type = "debit";
+                            else type = "debit";
 
-                            if (!isNaN(withdrawal) && withdrawal > 0) {
+                            if (parsed.length === 0 && type) {
                                 parsed.push({
-                                    date : formattedDate,
+                                    date: formattedDate,
                                     description,
                                     withdrawal: withdrawal,
-                                    type: "debit",
-                                    category: categorizeTransaction(description, "debit"),
-                                    balance: totalamount
-                                });
-                            }
-
-                            if (!isNaN(deposit) && deposit > 0) {
-                                parsed.push({
-                                    date : formattedDate,
-                                    description,
                                     deposit: deposit,
-                                    type: "credit",
-                                    category: categorizeTransaction(description, "credit"),
-                                    balance: totalamount
+                                    type,
+                                    category: categorizeTransaction(description, type),
+                                    balance: totalamount,
                                 });
                             }
 
@@ -409,123 +438,56 @@
           return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
         }
 
-        // function parseTransactionText(text) {
-        //     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        //     const parsed = [];
-        //     const numToken = /^-?[\d,]+(?:\.\d+)?$/;
-        //     const numWithCrDr = /^(-?[\d,]+(?:\.\d+)?)(cr|dr)$/i;
+        function parseTransactionText(lines) {
+            // detect Bank Name
+            //let bankName = detectBankName(lines);
 
-        //     function toNum(s) {
-        //         if (s == null) return null;
-        //         const n = parseFloat(s.replace(/,/g, ''));
-        //         return Number.isFinite(n) ? n : null;
-        //     }
+            const row = /^\d+\s+(\d{2}[-/]\d{2}[-/]\d{4})\s+(.+?)\s+([\d,]+\.\d{2})$/;
+            const balanceRow = /^(?:Balance\s+)?₹?\s*([\d,]+\.\d{2})$/i;;
 
-        //     for (const rawLine of lines) {
-        //         // 1) Must start with a date
-        //         const mDate = rawLine.match(/^(\d{2}[\/-]\d{2}[\/-]\d{2,4})\s+(.*)$/);
-        //         if (!mDate) continue;
+            const clean = (s) =>s == null || s === "" ? null : parseFloat(String(s).replace(/[₹,\s]/g, ""));
+            const toISO = (ddmmyyyy) => {
+                const [dd, mm, yyyy] = ddmmyyyy.replace(/\//g, "-").split("-");
+                const d = new Date(Date.UTC(+yyyy, +mm - 1, +dd));
+                return isNaN(d) ? null : d.toISOString().slice(0, 10);
+            };
 
-        //         const rawDate = mDate[1];
-        //         let rest = mDate[2];
+            const transactions = [];
+            let lastTx = null;
 
-        //         // 2) Tokenize and normalize tokens like "123.45CR" -> ["123.45","CR"]
-        //         let tokens = rest.split(/\s+/).flatMap(t => {
-        //         const m = t.match(numWithCrDr);
-        //         if (m) return [m[1], m[2].toUpperCase()];
-        //         return [t];
-        //         });
+            for (const line of lines) {
+                let m = row.exec(line);
+                if (m) {
+                    const [, dateStr, desc, amountStr] = m;
+                    const amount = clean(amountStr);
 
-        //         // 3) Pull up to 3 numeric tokens from end (common: debit, credit, balance)
-        //         const numeric = [];
-        //         for (let i = tokens.length - 1; i >= 0 && numeric.length < 3; i--) {
-        //             if (numToken.test(tokens[i])) {
-        //                 numeric.push(tokens[i]);
-        //                 tokens.splice(i, 1); // remove from description
-        //             }
-        //         }
-        //         numeric.reverse(); // keep natural order
+                    let type = null;
+                    if (/CR/i.test(desc)) type = "credit";
+                    else if (/DR/i.test(desc)) type = "debit";
+                    else type = "debit"; // fallback
 
-        //         // 4) Detect markers for type
-        //         const lower = rest.toLowerCase();
-        //         const marker = /\bdr\b|\bdebit\b/.test(lower)? "debit": (/\bcr\b|\bcredit\b/.test(lower) ? "credit" : null);
+                    lastTx = {
+                        date: toISO(dateStr),
+                        description: desc,
+                        withdrawal: type === "debit" ? amount : 0,
+                        deposit: type === "credit" ? amount : 0,
+                        type,
+                        category: categorizeTransaction(desc, type),
+                        balance: undefined
+                    };
 
-        //         // 5) Assign numbers
-        //         // numeric can be: [amount, balance] OR [debit, credit, balance] OR [amount] etc.
-        //         let debit = null, credit = null, balance = null;
+                    transactions.push(lastTx);
+                    continue;
+                }
 
-        //         if (numeric.length === 3) {
-        //             // Heuristic: many statements are [debit, credit, balance]
-        //             const d = toNum(numeric[0]);
-        //             const c = toNum(numeric[1]);
-        //             const b = toNum(numeric[2]);
-        //             balance = b;
-
-        //             // Prefer obvious 0/blank in either debit/credit slot
-        //             if ((d ?? 0) !== 0 && (c ?? 0) === 0) {
-        //                 debit = d;
-        //             } else if ((c ?? 0) !== 0 && (d ?? 0) === 0) {
-        //                 credit = c;
-        //             } else if (marker === "debit") {
-        //                 debit = d ?? c;
-        //             } else if (marker === "credit") {
-        //                 credit = c ?? d;
-        //             } else {
-        //                 // fallback: negative -> debit; positive -> credit (pick the non-zero)
-        //                 const candidates = [d, c].filter(v => v != null && v !== 0);
-        //                 if (candidates.length) {
-        //                     const amt = candidates[0];
-        //                     if (amt < 0) debit = Math.abs(amt);
-        //                     else credit = amt;
-        //                 }
-        //             }
-        //         } else if (numeric.length === 2) {
-        //             // Often [amount, balance]
-        //             const amt = toNum(numeric[0]);
-        //             balance = toNum(numeric[1]);
-        //             if (marker === "debit") debit = Math.abs(amt);
-        //             else if (marker === "credit") credit = Math.abs(amt);
-        //             else if (amt < 0) debit = Math.abs(amt);
-        //             else credit = amt;
-        //         } else if (numeric.length === 1) {
-        //             // Only one number: treat as amount; no balance available
-        //             const amt = toNum(numeric[0]);
-        //             if (marker === "debit") debit = Math.abs(amt);
-        //             else if (marker === "credit") credit = Math.abs(amt);
-        //             else if (amt < 0) debit = Math.abs(amt);
-        //             else credit = amt;
-        //         } else {
-        //             // No usable numbers
-        //             continue;
-        //         }
-
-        //         // 6) Build description from remaining tokens
-        //         const description = tokens.join(" ").replace(/\s{2,}/g, " ").trim();
-
-        //         // 7) Date normalize
-        //         const dObj = parseDate(rawDate);
-        //         const formattedDate = (dObj instanceof Date && !isNaN(dObj))? dObj.toISOString().split("T")[0] : null;
-
-        //         // 8) Skip lines that still couldn't determine an amount
-        //         const hasAmt = (debit != null && debit !== 0) || (credit != null && credit !== 0);
-        //         if (!hasAmt) continue;
-
-        //         // 9) Push
-        //         const type = debit != null ? "debit" : "credit";
-        //         parsed.push({
-        //             date: formattedDate,
-        //             description,
-        //             withdrawal: debit ?? undefined,
-        //             deposit: credit ?? undefined,
-        //             type,
-        //             category: categorizeTransaction(description, type),
-        //             balance: balance ?? undefined
-        //         });
-        //     }
-        //     console.log("Parsed transactions:", parsed);
-        //     return parsed;
-        // }
-
+                // If this line is just a Balance
+                let b = balanceRow.exec(line);
+                if (b && lastTx) {
+                    lastTx.balance = clean(b[1]);
+                }
+            }
+            return transactions;
+        }
 
         function parseDate(dateStr) {
             //  Prevent error if input is null/undefined/empty
