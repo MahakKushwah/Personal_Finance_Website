@@ -76,7 +76,6 @@ def upload_transactions(request):
                 credit_val = clean_amount(t.get("deposit",0))
                 debit_val = clean_amount(t.get("withdrawal",0))
                 balance_val = clean_amount(t.get("balance",0))
-                description = t.get("remarks", '')
 
                 if credit_val > 0:
                     credit = credit_val

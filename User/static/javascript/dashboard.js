@@ -252,7 +252,7 @@
                     );
                     allLines = allLines.concat(pageLines);
                 }
-                return parseTransactionText(allLines).transactions;
+                return parseTransactionText(allLines);
             }
             let transactions;
             try {
