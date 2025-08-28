@@ -15,6 +15,21 @@
         </div>
     {% endfor %}
 {% endif %}
+
+<!-- Purple section top user bar -->
+<div class="user-topbar" style="float: right;">
+    <button id="profileBtn" class="profile-btn" aria-haspopup="true" aria-expanded="false" title="Profile">
+        <!-- Inline SVG so it always renders (no static image needed) -->
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14z"/>
+        </svg>
+    </button>
+    <div class="profile-dropdown" id="profileDropdown" role="menu">
+        <a class="dropdown-item" href="{% url 'logout' %}">Logout</a>
+    </div>
+</div>
+
+
 <div class="container">
     <div class="header">
         <h1>Bank Statement Analyzer</h1>
@@ -61,15 +76,17 @@
         </div>
 
         <!-- If not Transactions Found then Display Message -->
-        <p id="noDataMessage" id="dateFilterMessage"></p>
+        <p id="noDataMessage"></p>
     </div>
 
 
     <div class="error-message" id="errorMessage"></div>
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>Processing your bank statement...</p>
-        </div>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>Processing your bank statement...</p>
+    </div>
+
+    <div class="status-message" id="statusMessage"></div>
 
     <div class="analytics-section" id="analyticsSection">
         <div class="stats-grid">
@@ -110,7 +127,8 @@
                 <table id="transactionTable">
                     <thead>
                         <tr>
-                            <th>Date</th>
+                            <th>Bank Name</th> 
+                            <th>Date</th>                            
                             <th>Description</th>
                             <th>Category</th>
                             <th>Amount</th>

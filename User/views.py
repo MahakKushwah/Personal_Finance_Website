@@ -20,7 +20,11 @@ def Register_View(request) :
             user = authenticate(request, username=user.username, password=request.POST['password1'])
             # Now Django knows the backend
             if user is not None:
-                login(request,user)  
+                login(request,user) 
+
+                # Save user_id in session
+                request.session['user_id'] = user.id 
+
                 messages.success(request, "Registered successfully.")
                 return redirect('dashboard')
     else :
@@ -39,6 +43,10 @@ def Login_View(request) :
         if form.is_valid():
             user = form.get_user()
             login(request,user)
+
+            # Store user_id in session
+            request.session['user_id'] = user.id
+
             messages.success(request, "Login successful.")
             return redirect('dashboard')
         else:
@@ -66,5 +74,12 @@ def Dashboard_View(request):
 # Google Login Method
 @login_required
 def GoogleLoginRedirectView(request):
-    messages.success(request, f"Welcome {request.user.first_name or request.user.username}, login successful!")
-    return redirect('dashboard') 
+    if request.user.is_authenticated:
+        # Save user_id in session
+        request.session['user_id'] = request.user.id 
+
+        messages.success(request, f"Welcome {request.user.first_name or request.user.username}, login successful!")
+        return redirect('dashboard') 
+    else:
+        messages.error(request, "Google login failed. Please try again.")
+        return redirect('login')

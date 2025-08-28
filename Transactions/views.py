@@ -2,6 +2,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from .models import Transaction
+from FileDetails.models import FileDetails, BankDetails
 import json
 from decimal import Decimal
 import re
@@ -20,13 +21,18 @@ def clean_amount(value):
 
     return Decimal(cleaned or '0.00')
 
-# # Convert string date to YYYY-MM-DD
-# def parse_date(date_string):
-#     try:
-#         return datetime.strptime(date_string, '%d-%m-%Y').date()
-#     except Exception as e:
-#         print(f"Date parse error: {e} for input {date_string}")
-#         return None
+BANK_CODE_MAP = {
+    "HDFC": "HDFC Bank",
+    "SBIN": "State Bank of India",
+    "ICIC": "ICICI Bank",
+    "PNBN": "Punjab National Bank",
+    "AXIS": "Axis Bank",
+    "KARB": "Karnataka Bank",
+    "YESB": "Yes Bank",
+    "IDFB": "IDFC First Bank",
+    "UBIN": "Union Bank of India",
+    "BARB": "Bank of Baroda",
+}
 
 # Upload Transactions File 
 @csrf_exempt
@@ -35,17 +41,81 @@ def upload_transactions(request):
         return JsonResponse({'error': 'Invalid method'}, status=405)
 
     try:
+        user_id = request.session.get("user_id")
+
+        # Fallback if session key missing but user still logged in
+        if not user_id and request.user.is_authenticated:
+            user_id = request.user.id
+
+        # If still no user, force re-login
+        if not user_id:
+            return JsonResponse({"error": "User not logged in or session expired"}, status=401)
+
         data = json.loads(request.body)
+        fd_data = data.get("file_details", {}).get("details", {})  # file and bank-related info
+        bank_data = data.get("file_details", {}).get("bankDetails", {})
         transactions = data.get('transactions', [])
+        print("Statement Date : " , fd_data.get("statementDate"))
+        print("Data : ", data)
+        print("fd_data : ",fd_data);
+        print("Details:", data.get("file_details", {}).get("details", {}))
+        print("Bank data:", data.get("file_details", {}).get("bankDetails", {}))
+        print("Type of fd_data : ", type(fd_data))
+        print("transactions : ",transactions)
+        print("Type of transactions : ", type(transactions))
 
         # Debugging logs
-        print("Request method:", request.method)
-        print("Received transactions:", transactions[:5])  #Show first 5 rows
-
         if not isinstance(transactions, list):
             return JsonResponse({'error': 'Transactions should be a list'}, status=400)
 
+        # Detect bank from IFSC prefix
+        ifsc = bank_data.get('ifsc_code')
+        bank_name = bank_data.get("bankName")
+        if(ifsc):
+            bank_code = ifsc[:4].upper()
+            bank_name = BANK_CODE_MAP.get(bank_code, "Unknown Bank")      
+        
+        # Bank Details Saving in Database
+        bank_obj, __ = BankDetails.objects.update_or_create(
+            bank_account_num=bank_data.get("accountNumber"),
+            cif_number = bank_data.get("cif_number"),
+            defaults={
+                "bank_name": bank_name,
+                "bank_branch": bank_data.get("branch"),
+                "ifsc_code": ifsc,
+            }
+        )
+
+        # --- DATE HANDLING ---        
+        if(fd_data.get("statementDate") ) != None : 
+            parsed_statement_date = ( fd_data.get("statementDate")).strip()
+        else:
+            parsed_statement_date = ( fd_data.get("transactionDateTo")).strip()
+
+        for fmt in ('%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d'):
+            try:
+                statementDate = datetime.strptime(parsed_statement_date, fmt).date()
+                break
+            except ValueError:
+                print(f"Invalid statement date format -> {parsed_statement_date} with fmt {fmt}")
+                continue
+        
         saved_count = 0
+        # File Deatils Saving in Database 
+        # 2. Create FileDetails and link with Bank
+        file_obj = FileDetails.objects.create(
+            user_id=user_id,    # logged-in or newly created user
+            file_name=fd_data.get("fileName"),
+            statement_type=fd_data.get("statementType"),
+            bank =bank_obj,
+            bank_id = bank_obj.id,
+            account_name=fd_data.get("accountName"),
+            statement_date=statementDate,   
+            upload_date = fd_data.get("uploadDate"),        
+            address=fd_data.get("address")            
+        )
+
+        #Transactions  Saving in Database
         for i, t in enumerate(transactions):
             try:
                 if not isinstance(t, dict):
@@ -66,10 +136,8 @@ def upload_transactions(request):
                         parsed_date = datetime.strptime(date_str, fmt).date()
                         break
                     except ValueError:
+                        print(f"Skipping row {i+1}: invalid date -> {date_str}")
                         continue
-                if not parsed_date:
-                    print(f"Skipping row {i+1}: invalid date -> {date_str}")
-                    continue
 
                 category = t.get("category");
                 description = t.get("description", '');
@@ -89,15 +157,19 @@ def upload_transactions(request):
 
                 # --- SAVE TO DB ---
                 Transaction.objects.create(
+                    file_details=file_obj,
                     date=parsed_date,
                     category=t.get('category', category),
                     description=description,
                     amount=balance_val,
                     credit = credit,
-                    debit = debit
+                    debit = debit,
+                    filename = file_obj.file_name,
+                    file_details_id = file_obj.id,
+                    bank_name = bank_name
                 )
                 saved_count += 1
-                print("Saved Count : "+ saved_count)
+                print("Saved Count : ", saved_count)
             except Exception as e:
                 print(f"Error in row {i+1}: {e}")
                 continue

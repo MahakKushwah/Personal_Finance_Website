@@ -9,11 +9,15 @@
         const errorMessage = document.getElementById('errorMessage');
         const showFilesBtn = document.getElementById("showFilesBtn");
         const fileList = document.getElementById("fileList");
+        const statusMessage = document.getElementById("statusMessage");
         //Date Filter Logic 
         const fromInput = document.getElementById("from");
         const toInput = document.getElementById("to");
         const filterBtn = document.querySelector(".filter-btn");
         const noDataMessage = document.getElementById("noDataMessage");
+        //Profile Icon
+        const profileBtn = document.getElementById("profileBtn");
+        const profileDropdown = document.getElementById("profileDropdown");
 
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
@@ -79,7 +83,9 @@
 
         fileInput.addEventListener('change', (e) => {
             clearDateFilters();
-            handleFiles(e.target.files);
+            // ✅ Capture file selection date
+            const uploadDate = new Date().toISOString().split('T')[0];
+            handleFiles(e.target.files, uploadDate);
         });
 
         // Date Range Filter
@@ -131,6 +137,23 @@
             }
         });
 
+        //ProfileIcon
+        if (profileBtn && profileDropdown) {
+            profileBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const isOpen = profileDropdown.style.display === "block";
+                profileDropdown.style.display = isOpen ? "none" : "block";
+            });
+
+            // Close when clicking outside
+            window.addEventListener("click", () => {
+                profileDropdown.style.display = "none";
+            });
+
+            // Prevent closing when clicking inside the dropdown
+            profileDropdown.addEventListener("click", (e) => e.stopPropagation());
+        }
+
         //To find the bank name 
         function detectBankName(lines) {
             const patterns = [
@@ -162,48 +185,68 @@
 
         function showError(message) {
             errorMessage.textContent = message;
-            setTimeout(() => {
-                errorMessage.style.display = 'block';
-            }, 5000);
+            errorMessage.style.display = 'block';
             setTimeout(() => {
                 errorMessage.style.display = 'none';
             }, 5000);
         }
 
+        function showStatusMessage(message, type = "info") {
+            
+            statusMessage.textContent = message;
+    
+            // Reset classes
+            statusMessage.className = "status-message " + type;
+
+            // Show it
+            statusMessage.style.display = "block";
+
+            // Auto-hide after 5 seconds (optional)
+            setTimeout(() => {
+                statusMessage.style.display = "none";
+                }, 2000);
+            }
+
         function showLoading(show) {
             loading.style.display = show ? 'block' : 'none';
         }
 
-        async function handleFiles(files) {
+        async function handleFiles(files,uploadDate) {
             if (files.length === 0) return;
 
             showLoading(true);
             transactionData = [];
+            allFileDetails = [];
+            let transactions = [];
 
             try {
                 for (const file of files) {
                     const ext = file.name.split('.').pop().toLowerCase();
-                    let transactions = [];
 
                     if (ext === 'csv') {
-                      const data = await processCSV(file);
-                      transactions = transactions.concat(data);
+                      const parsed = await processCSV(file, uploadDate);
+                      fileDetails = parsed.fileDetails;
+                      transactions = transactions.concat(parsed.transactions);
                     } else if (ext === 'xls' || ext === 'xlsx') {
-                      const data = await processExcel(file);
-                      transactions = transactions.concat(data);
+                      const parsed = await processExcel(file,uploadDate);
+                      fileDetails = parsed.fileDetails;
+                      transactions = transactions.concat(parsed);
                     } else if (ext === 'pdf') {
-                      const data = await processPDF(file);
-                      //currentBankName = bankName;
-                      transactions = transactions.concat(data);
+                      const parsed = await processPDF(file, uploadDate); // returns { fileDetails, transactions }
+                      fileDetails = parsed.fileDetails;
+                      transactions = transactions.concat(parsed.transactions);
                     } else {
                         showError('Unsupported file format. Please upload PDF, Excel, or CSV files : ${file.name}');
                         continue;
                     }
+                    allFileDetails.push(fileDetails);
+                    console.log("allFileDetails :", JSON.stringify(allFileDetails, null, 2));
                     transactionData.push(transactions);
+                    console.log("Transaction data :", JSON.stringify(transactionData, null, 2));
                 }
 
                 if (transactionData.length > 0) {
-                    sendToBackend(transactionData); 
+                    sendToBackend(fileDetails,transactions); 
                     analyzeTransactions(fromDate = null , toDate = null , filteredTransactions = []);
                     showAnalytics(); 
                 } else {
@@ -217,7 +260,7 @@
         }
 
         //let currentBankName = "";
-        async function processPDF(file) {
+        async function processPDF(file, uploadDate) {
 
             async function loadPDF(password = null) {
                 const arrayBuffer = await file.arrayBuffer();
@@ -252,7 +295,11 @@
                     );
                     allLines = allLines.concat(pageLines);
                 }
-                return parseTransactionText(allLines);
+                console.log("AllLines : ", allLines);
+                const fileDetails = parseFileDetails(allLines, file,uploadDate);
+                const transactions =  parseTransactionText(allLines);
+
+                return {fileDetails,transactions};
             }
             let transactions;
             try {
@@ -275,47 +322,105 @@
             return transactions;
         }
         
-        async function processExcel(file) {
+        async function processExcel(file,uploadDate) {
             const arrayBuffer = await file.arrayBuffer();
-            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }); // Raw array of rows
+            const workbook = XLSX.read(arrayBuffer, { 
+                type: 'array', 
+                cellDates: true,   // ✅ Parse Excel serials into Date objects
+                cellNF: false, 
+                cellText: false 
+            });
+            const sheetName = workbook.SheetNames[0];
+            const firstSheet = workbook.Sheets[sheetName];
+            console.log("Workbook object:", workbook);
+            console.log("All SheetNames in workbook:", workbook.SheetNames);
+            const cleanData = workbook.Strings.map(item => item.t);
+            console.log("workbook.Sheets : ",cleanData);
+            console.log("workbook.Sheets[sheetName] : ",workbook.Sheets[sheetName]);
+            console.log("SheetName : ",sheetName);
+            console.log("firstSheet : ",firstSheet);
+            console.log("Clean Data : ", cleanData);
+            // // Find the range of the sheet
+            // const range = XLSX.utils.decode_range(firstSheet['!ref']);
+            // console.log("Range:", range);
+            // const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true }); // ✅ ensures strings not serials
+            // console.log("XL Data : ",   data);
+            const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true });
+            console.log("XL Data : ", data);
+            let headerRowIndex = -1;
 
-            if (data.length < 2) return [];
+            if (data.length < 2) return { fileDetails: {}, transactions: [] };
 
-            const headers = data[0].map(h => h ? h.toString().toLowerCase().trim() : '');
+            // Flatten into "lines" like CSV, so parseFileDetails works
+            const lines = data.map(row => row.join(" , "));
 
-            let dateCol = -1, descCol = -1, withdrawalCol = -1, depositCol = -1;
+            //  Parse file metadata
+            const fileDetails  = parseFileDetails(lines, file, uploadDate);
 
-             headers.forEach((header, index) => {
-                if (header.includes("value date") || header.includes("transaction date")) dateCol = index;
-                if (header.includes("description") || header.includes("remarks") || header.includes("narration")) descCol = index;
-                if (header.includes("withdrawal") || header.includes("debit")) withdrawalCol = index;
-                if (header.includes("deposit") || header.includes("credit")) depositCol = index;
+            // Normalize rows (convert all to strings, except dates)
+            const normalizedData = data.map(row => {
+                return row.map(cell => {
+                    if (!cell) return "";
+
+                    // ✅ Handle Date conversion
+                    if (cell instanceof Date) {
+                        // Format to dd-mm-yyyy
+                        const day = String(cell.getDate()).padStart(2, "0");
+                        const month = String(cell.getMonth() + 1).padStart(2, "0");
+                        const year = cell.getFullYear();
+                        return `${day}-${month}-${year}`;
+                    }
+                    return cell.toString().trim();
+                });
             });
 
-            if (dateCol === -1) dateCol = 1;
-            if (descCol === -1) descCol = 4;
-            if (withdrawalCol === -1) withdrawalCol = 5;
-            if (depositCol === -1) depositCol = 6;
+            // Possible variations of "date" headers across banks 
+            const possibleHeaders = ["debit", "credit","remarks", "description", "balance","date","txn date"]; 
+            //Find header row index
+            if (headerRowIndex === -1) {
+                headerRowIndex = normalizedData.findIndex(row => {
+                    let matches = 0;
+                    row.forEach(cell => {
+                        if (!cell) return;
+                        const cellValue = cell.toString().toLowerCase().trim();
+                        if (possibleHeaders.some(keyword => cellValue.includes(keyword))) {
+                            matches++;
+                        }
+                    });
+                    return matches >= 2; // e.g., row has at least 2 matches like debit + balance
+                });
+            }
 
+            if (headerRowIndex === -1) {
+                console.error("⚠️ No valid transaction header row found in file");
+            } else {
+                console.log("✅ Header row found at index:", headerRowIndex, normalizedData[headerRowIndex]);
+            }
+
+            const headers = normalizedData[headerRowIndex].map(h => h ? h.toString().toLowerCase().trim() : '');
+            
+            let dateCol = -1, descCol = -1, withdrawalCol = -1, depositCol = -1 , balanceCol = -1;
+
+            headers.forEach((header, index) => {
+                if (header.includes("value date") || header.includes("transaction date") || header.includes("date") || header.includes("txn date")) dateCol = index;
+                if (header.includes("description") || header.includes("remarks") || header.includes("narration") || header.includes("transaction remarks")) descCol = index;
+                if (header.includes("withdrawal") || header.includes("debit") || header.includes("withdrawal amount") || header.includes("debit amount")) withdrawalCol = index;
+                if (header.includes("deposit") || header.includes("credit") || header.includes("credit amount") || header.includes("deposit amount")) depositCol = index;
+                if (header.includes("balance") || header.includes("balance amount")) balanceCol = index;
+            });
+            console.log("11. dateCol , 2.descCol , 3.withdrawalCol , 4.depositCol , 5.balanceCol : )" , dateCol, descCol, withdrawalCol, depositCol, balanceCol);  
             const transactions = [];
-
-            for (let i = 1; i < data.length; i++) {
-                const row = data[i];
+            
+            for (let i = headerRowIndex + 1; i < normalizedData.length; i++) {
+                const row = normalizedData[i];
                 if (!row || row.length === 0) continue;
 
-                const parsedDate = parseDate(row[dateCol] || row["Date"] || row["date"] || row["Txn Date"] || "");
-				let formattedDate = null;
-                if (parsedDate instanceof Date && !isNaN(parsedDate)) {
-                    // Add one day before formatting
-                    parsedDate.setDate(parsedDate.getDate() + 1);
-                    formattedDate = parsedDate?.toISOString().split('T')[0];
-                }
-                const description = (row[descCol] || row["Description"] || row["Transaction Remarks"] || row["Remarks"] ||"").toString().trim();
-                const withdrawalAmount = parseFloat((row[withdrawalCol] || row["Withdrawal Amount"] || row["Debit Amount"] || row["Debit"] || '0').replace(/[₹,]/g, ''));
-                const depositAmount = parseFloat((row[depositCol] || row["Deposit Amount"] || row["Credit Amount"] || row["Credit"] ||'0').replace(/[₹,]/g, ''));
-				const totalamount = parseFloat((row["Balance"] || '0').replace(/[₹,]/g, ''));
+                const parsedDate = (row[dateCol] || "");
+                const description = (row[descCol] || "").toString().trim();
+                const withdrawalAmount = parseFloat((row[withdrawalCol] ||'0').toString().replace(/[₹,]/g, ''));
+                const depositAmount = parseFloat((row[depositCol] ||'0').toString().replace(/[₹,]/g, ''));
+                const totalamount = balanceCol !== -1 ? parseFloat((row[balanceCol] || '0').toString().replace(/[₹,]/g, '')): 0;
+                
 
                 //To identify whether the transaction type is credit or debit 
                 let type = null;
@@ -325,9 +430,9 @@
                     type = "debit";
                 else type = "debit";
 
-                if (parsed.length === 0 && type) {
-                    parsed.push({
-                        date: formattedDate,
+                if (type) {
+                    transactions.push({
+                        date: parsedDate,
                         description,
                         withdrawal: withdrawalAmount,
                         deposit: depositAmount,
@@ -337,20 +442,36 @@
                     });
                 }
             }
-            return transactions;
+            return { fileDetails, transactions };
         }
 
-        async function processCSV(file) {
+        async function processCSV(file , uploadDate) {
             return new Promise(resolve => {
-                Papa.parse(file, {
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: results => {
+
+                const reader = new FileReader();
+
+                reader.onload = e => {
+                    const fileContent = e.target.result;
+                    const lines = fileContent.split(/\r?\n/);
+
+                    //  Step 1: extract file details
+                    const fileDetails = parseFileDetails(lines, file ,uploadDate);
+
+                    // If found, slice only the transaction rows
+                    const headerIndex = lines.findIndex(line => line.includes("Sr No"));
+                    const transactionCSV = lines.slice(headerIndex).join("\n");
+                    console.log("headerIndex : ", headerIndex);
+                    console.log("transactionCSV : ", transactionCSV);
+
+                    Papa.parse(transactionCSV, {
+                        header: true,
+                        skipEmptyLines: true,
+                        complete: results => {
                         const transactions = results.data.map(row => {
                             const rawDate = row["Date"] || row["date"] || row["Txn Date"] || "";
                             const parsedDate = parseDate(rawDate);
                             let formattedDate = null;
-                             if (parsedDate instanceof Date && !isNaN(parsedDate)) {
+                            if (parsedDate instanceof Date && !isNaN(parsedDate)) {
                                 // Add one day before formatting
                                 parsedDate.setDate(parsedDate.getDate() + 1);
                                 formattedDate = parsedDate?.toISOString().split('T')[0];
@@ -358,7 +479,7 @@
                             const description = row["Description"] || row["Transaction Remarks"] || row["Remarks"] || '';
                             const withdrawal = parseFloat((row["Withdrawal Amount"] || row["Debit Amount"] || row["Debit"] || '0').replace(/[₹,]/g, ''));
                             const deposit = parseFloat((row["Deposit Amount"] || row["Credit Amount"] || row["Credit"] || '0').replace(/[₹,]/g, ''));
-                            const totalamount = parseFloat((row["Balance"] || '0').replace(/[₹,]/g, ''));
+                            const totalamount = parseFloat((row["Balance"] || row["Balance Amount"] || '0').replace(/[₹,]/g, ''));
                             const parsed = [];
                             
                             //To identify whether the transaction type is credit or debit 
@@ -381,19 +502,144 @@
                                 });
                             }
 
-                    return parsed;
-                }).flat();
-                resolve(transactions);
-            }
+                            return parsed;
+                        }).flat();
+                        resolve({
+                            fileDetails,
+                            transactions
+                        });
+                    }
+                });
+            };
+            reader.readAsText(file); // Read raw file text first
             });
-        });
         }
 
+        //Parse File Details 
+        function parseFileDetails(lines, file, uploadDate) { 
+            let details = { 
+                bankName: null,
+                accountNumber: null, 
+                ifscCode: null, 
+                accountName: null, 
+                address: null, 
+                branch: null, 
+                cifNumber: null,
+                statementDate: null,
+                transactionDateTo : null,
+                fileName: file.name,                 
+                statementType: detectStatementType(file.name , lines), // helper function to guess file type
+                uploadDate : uploadDate 
+            }; 
+
+            //console.log("Detected file type:", fileType);   
+            for (let line of lines) {
+                // Account Number (supports "Account Number" / "Account number" / "ACCOUNT NUMBER" / "SBI - Account Number" etc.)
+                if (/Account\s*Number/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.accountNumber = value;
+                }
+
+                // IFSC Code
+                if (/(IFS|IFSC)/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.ifscCode = value;
+                }
+
+                // Branch
+                if (/Branch/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.branch = value;
+                }
+
+                // CIF Number
+                if (/CIF/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.cifNumber = value;
+                }
+
+                // Account Holder Name
+                if (/Name/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.accountName = value;
+                }
+
+                // Address
+                if (/Address/i.test(line)) {
+                    const value = line.split(":").pop().trim();
+                    if (value) details.address = value;
+                }
+                
+                // Statement Date
+                if (/^Date\s*:/i.test(line)) {
+                    let matchDate = line.match(/(\d{2}[-/]\d{2}[-/]\d{4}|\d{2}\s+[A-Za-z]{3,9}\s+\d{4}|\d{4}[-/]\d{2}[-/]\d{2})/);
+                    if (matchDate) {
+                        details.statementDate = matchDate[1];
+                    }
+                }
+
+                if (/Transaction Date/i.test(line)) {
+                    let toMatch = line.match(/To\s*:\s*(\d{2}-\d{2}-\d{4})/);
+                    if (toMatch) {
+                        details.transactionDateTo = toMatch[1];
+                    }
+                }
+            }
+
+            // Build bankDetails separately
+            let bankDetails = {
+                bankName: details.bankName,
+                accountNumber: details.accountNumber,
+                bank_branch: details.branch,
+                cif_number : details.cifNumber,
+                ifsc_code: details.ifscCode
+            };
+
+            return { details, bankDetails };
+        }
+
+        //Detect File Type 
+        function detectStatementType(filename, fileText = "") {
+            const name = (filename + " " + fileText).toLowerCase();
+
+            if (/credit\s*card|visa|mastercard|rupay/i.test(name)) {
+                return "CREDIT";  // Credit Card Statement
+            } 
+            else if (/mutual\s*fund|folio|amc/i.test(name)) {
+                return "MUTUAL";  // Mutual Fund Statement
+            } 
+            else if (/loan|emi|mortgage|personal\s*loan|home\s*loan/i.test(name)) {
+                return "LOAN";  // Loan Statement
+            } 
+            else if (/fixed\s*deposit|fd\s*receipt|term\s*deposit/i.test(name)) {
+                return "FD";  // Fixed Deposit
+            } 
+            else if (/insurance|policy|premium/i.test(name)) {
+                return "INSURANCE";  // Insurance
+            } 
+            else if (/pf\s*statement|provident\s*fund|ppf/i.test(name)) {
+                return "PF";  // Provident Fund
+            } 
+            else if (/demat|holding\s*statement|nsdl|cdsl|brokerage/i.test(name)) {
+                return "STOCK";  // Demat / Stock Statement
+            } 
+            else if (/wallet|paytm|phonepe|gpay|upi/i.test(name)) {
+                return "WALLET";  // Digital Wallet / UPI
+            } 
+            else if (/bank\s*statement|savings|current\s*account|account\s*number/i.test(name)) {
+                return "BANK";  // Generic Bank Statement
+            } 
+            else {
+                return "OTHER";  // Default fallback
+            }
+        }
+
+
         //Send data to Backend
-        async function sendToBackend(data) {
+        async function sendToBackend(fileDetails, transaction) {
         //  Log the data we’re about to send
-        console.log("Sending to backend:", data);
-        status.textContent = 'Uploading...';
+        // console.log("Sending to backend:", data);
+        statusMessage.textContent = 'Uploading...';
 
         // Force the correct absolute URL
         const uploadUrl = 'api/upload-transactions/';
@@ -407,7 +653,10 @@
                 'X-CSRFToken': getCSRFToken(),
             },
             // Ensure data is a flat array before sending
-            body: JSON.stringify({ transactions: Array.isArray(data) ? data.flat() : [] })
+            body: JSON.stringify({
+                file_details: fileDetails,
+                transactions: transaction
+            })
         });
 
         // Read the raw text first (for debugging if it's not valid JSON)
@@ -418,20 +667,22 @@
         try {
             console.log("Raw Text : " + rawText);
             result = JSON.parse(rawText);
-           console.log("Payload:", JSON.stringify({ transactions: Array.isArray(data) ? data.flat() : [] }));
         } catch (err) {
-            console.log("Payload:", JSON.stringify({ transactions: Array.isArray(data) ? data.flat() : [] }));
             console.warn("Response is not JSON:", err);
             result = { error: rawText };
         }
 
         //  Log final result
         console.log("Parsed response:", result);
-        status.textContent = result.message || result.error || 'Done';
+        const type = "success";
+        const resultmessage = result.message || result.error || 'Done';
+        showStatusMessage(resultmessage,type);
         } catch (err) {
+            const type = "error";
             console.error("Upload failed:", err);
-            status.textContent = 'Upload failed.';
-            }
+            const errormessage  = 'Upload failed.';
+            showStatusMessage(errormessage,type);
+          }
         }
 
         function getCSRFToken() {
@@ -490,30 +741,40 @@
         }
 
         function parseDate(dateStr) {
-            //  Prevent error if input is null/undefined/empty
-            if (!dateStr) return new Date();
+            if (!dateStr) return null;
 
-            const cleanDate = dateStr.toString().replace(/[^\d\/\-]/g, '');
+            const cleanDate = dateStr.toString().trim();
 
+            // Try multiple formats
             const formats = [
-                /(\d{2})\/(\d{2})\/(\d{4})/,
-                /(\d{2})-(\d{2})-(\d{4})/,
-                 /(\d{2})\/(\d{2})\/(\d{2})/,
-                 /(\d{2})-(\d{2})-(\d{2})/
-             ];
+                { regex: /(\d{2})[\/\-](\d{2})[\/\-](\d{4})/, order: ["d","m","y"] }, // dd/mm/yyyy or dd-mm-yyyy
+                { regex: /(\d{2})[\/\-](\d{2})[\/\-](\d{2})/, order: ["d","m","y2"] }, // dd/mm/yy
+                { regex: /(\d{4})[\/\-](\d{2})[\/\-](\d{2})/, order: ["y","m","d"] }, // yyyy-mm-dd
+                { regex: /(\d{2})\.(\d{2})\.(\d{4})/, order: ["d","m","y"] }, // dd.mm.yyyy
+            ];
 
-            for (let format of formats) {
-                const match = cleanDate.match(format);
+            for (let fmt of formats) {
+                const match = cleanDate.match(fmt.regex);
                 if (match) {
-                    let [, day, month, year] = match;
-                    if (year.length === 2) {
-                        year = '20' + year;
-                    }
-            return new Date(year, month - 1, day);
+                    let [ , part1, part2, part3 ] = match;
+                    let day, month, year;
+
+                    fmt.order.forEach((o, i) => {
+                        if (o === "d") day = parseInt([part1, part2, part3][i], 10);
+                        if (o === "m") month = parseInt([part1, part2, part3][i], 10);
+                        if (o === "y") year = parseInt([part1, part2, part3][i], 10);
+                        if (o === "y2") year = 2000 + parseInt([part1, part2, part3][i], 10);
+                    });
+
+                    const parsed = new Date(year, month - 1, day);
+                    if (!isNaN(parsed)) return parsed;
+                }
             }
-        }
-        // If no match found, return current date
-            return new Date();
+            // Try fallback for textual months (e.g. "22 Aug 2025")
+            const parsed = new Date(cleanDate);
+            if (!isNaN(parsed)) return parsed;
+
+            return null; // safer than returning current date
         }
 
         function categorizeTransaction(description, transactionType = 'debit') {
